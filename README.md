@@ -118,15 +118,14 @@ Examples:
 - Office
 - Gym
 - Shopping
-- Pesaro
-- Rimini
-- Cagli
-- Fondi
-- Urbino
+- City trips
+- Business trips
+- Travel
 - Holidays
+- Family
 - Other
 
-Categories are configurable and are intended to provide useful statistics, such as:
+Categories are configurable and are intended to adapt to different users and mileage-tracking needs.ed to provide useful statistics, such as:
 
 - number of office trips
 - total office kilometres
