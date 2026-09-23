@@ -51,8 +51,10 @@ async function telegram(env, method, body) {
   return response.json();
 }
 
-async function sendMessage(env, chatId, text) {
-  return telegram(env, "sendMessage", { chat_id: chatId, text });
+async function sendMessage(env, chatId, text, replyMarkup = undefined) {
+  const body = { chat_id: chatId, text };
+  if (replyMarkup) body.reply_markup = replyMarkup;
+  return telegram(env, "sendMessage", body);
 }
 
 async function getContract(env, userId) {
@@ -76,6 +78,7 @@ function helpText() {
     "",
     "Comandi:",
     "/km 5080 - registra il contachilometri",
+    "/annulla - annulla l'ultima lettura km",
     "/ufficio 70 - registra un viaggio",
     "/palestra 6",
     "/spesa 25",
@@ -125,9 +128,25 @@ async function addOdometer(env, userId, value) {
     "INSERT INTO odometer_readings (contract_id, reading_km) VALUES (?, ?)"
   ).bind(contract.id, value).run();
   if (!previous) {
-    return `✅ Prima lettura registrata: ${formatNumber(value)} km. Da questo valore parte il conteggio del consumo contrattuale.`;
+    return `✅ Contachilometri registrato: ${formatNumber(value)} km.\nDa ora i km usati dal contratto sono ${formatNumber(value)} km.`;
   }
-  return `✅ Contachilometri aggiornato a ${formatNumber(value)} km. Incremento: ${formatNumber(value - previous.reading_km)} km.`;
+  return `✅ Contachilometri aggiornato a ${formatNumber(value)} km.\nKm usati dal contratto: ${formatNumber(value)} km.`;
+}
+
+async function undoLastOdometer(env, userId) {
+  const contract = await ensureContract(env, userId);
+  if (!contract) return { ok: false, text: "Nessun contratto configurato." };
+  const last = await env.DB.prepare(
+    "SELECT id, reading_km FROM odometer_readings WHERE contract_id = ? ORDER BY id DESC LIMIT 1"
+  ).bind(contract.id).first();
+  if (!last) return { ok: false, text: "Non c'è nessuna lettura km da annullare." };
+  await env.DB.prepare(
+    "DELETE FROM odometer_readings WHERE id = ? AND contract_id = ?"
+  ).bind(last.id, contract.id).run();
+  return {
+    ok: true,
+    text: `↩️ Annullata l'ultima lettura: ${formatNumber(last.reading_km)} km.`
+  };
 }
 
 async function addTrip(env, userId, category, value) {
@@ -141,9 +160,6 @@ async function addTrip(env, userId, category, value) {
 }
 
 async function usageStats(env, contract) {
-  const first = await env.DB.prepare(
-    "SELECT reading_km FROM odometer_readings WHERE contract_id = ? ORDER BY id ASC LIMIT 1"
-  ).bind(contract.id).first();
   const last = await env.DB.prepare(
     "SELECT reading_km FROM odometer_readings WHERE contract_id = ? ORDER BY id DESC LIMIT 1"
   ).bind(contract.id).first();
@@ -151,7 +167,10 @@ async function usageStats(env, contract) {
     "SELECT COALESCE(SUM(km), 0) AS km FROM trips WHERE contract_id = ?"
   ).bind(contract.id).first();
 
-  const odometerKm = first && last ? Math.max(0, last.reading_km - first.reading_km) : null;
+  // The odometer is an absolute vehicle mileage value. The contract usage
+  // therefore equals the latest odometer reading, not the delta from the
+  // first reading entered in the bot.
+  const odometerKm = last ? Number(last.reading_km) : null;
   const usedKm = odometerKm ?? Number(trip.km || 0);
   const remaining = contract.allowed_km - usedKm;
   const today = todayInTimeZone(env.TIME_ZONE || "UTC");
@@ -181,7 +200,7 @@ async function statsText(env, contract, detailed = true) {
     `Stato: ${status}`
   ];
   if (detailed) {
-    lines.push(`Letture odometro: ${formatNumber(s.odometerKm ?? 0)} km`);
+    lines.push(`Lettura odometro attuale: ${formatNumber(s.odometerKm ?? 0)} km`);
     lines.push(`Viaggi registrati: ${formatNumber(s.tripKm)} km`);
   }
   return lines.join("\n");
@@ -213,8 +232,37 @@ async function categoriesText(env, contract) {
   return ["📊 Categorie", ...rows.results.map(r => `• ${r.category}: ${formatNumber(Number(r.km))} km (${r.trips} viaggi)`)].join("\n");
 }
 
+async function handleCallback(update, env) {
+  const callback = update.callback_query;
+  const chatId = callback?.message?.chat?.id;
+  if (!callback?.id || !chatId) return { ok: true };
+
+  if (callback.data === "undo_last_odometer") {
+    const result = await undoLastOdometer(env, chatId);
+    await telegram(env, "answerCallbackQuery", {
+      callback_query_id: callback.id,
+      text: result.text
+    });
+    const contract = await getContract(env, chatId);
+    if (contract) {
+      await sendMessage(env, chatId, result.ok ? `${result.text}\n\n${await statsText(env, contract)}` : result.text);
+    }
+  } else if (callback.data === "show_stats") {
+    await telegram(env, "answerCallbackQuery", {
+      callback_query_id: callback.id,
+      text: "Statistiche aggiornate"
+    });
+    const contract = await getContract(env, chatId);
+    if (contract) await sendMessage(env, chatId, await statsText(env, contract));
+  }
+
+  return { ok: true };
+}
+
 async function handleUpdate(request, env) {
   const update = await request.json();
+  if (update.callback_query) return handleCallback(update, env);
+
   const message = update.message;
   if (!message?.chat?.id || typeof message.text !== "string") return { ok: true };
   const chatId = message.chat.id;
@@ -223,6 +271,7 @@ async function handleUpdate(request, env) {
   const args = parts;
 
   let reply;
+  let replyMarkup;
   if (command === "/start" || command === "/help") reply = helpText();
   else if (command === "/contratto") reply = await createContract(env, chatId, args);
   else {
@@ -231,6 +280,19 @@ async function handleUpdate(request, env) {
     else if (command === "/km") {
       const value = parsePositiveNumber(args[0]);
       reply = value ? await addOdometer(env, chatId, value) : "Uso: /km 5080";
+      if (value) {
+        replyMarkup = {
+          inline_keyboard: [
+            [
+              { text: "↩️ Annulla ultimo invio", callback_data: "undo_last_odometer" },
+              { text: "📊 Statistiche", callback_data: "show_stats" }
+            ]
+          ]
+        };
+      }
+    } else if (command === "/annulla") {
+      const result = await undoLastOdometer(env, chatId);
+      reply = result.text;
     } else if (["/oggi", "/settimana", "/mese", "/anno"].includes(command)) {
       reply = await periodText(env, contract, command === "/settimana" ? "week" : command === "/mese" ? "month" : command === "/anno" ? "year" : "today");
     } else if (command === "/statistiche" || command === "/riepilogo") reply = await statsText(env, contract, command === "/statistiche");
@@ -241,7 +303,7 @@ async function handleUpdate(request, env) {
     } else reply = "Comando non riconosciuto. Usa /help.";
   }
 
-  await sendMessage(env, chatId, reply);
+  await sendMessage(env, chatId, reply, replyMarkup);
   return { ok: true };
 }
 
