@@ -1,0 +1,9 @@
+name = "car-km-tracker"
+main = "src/index.js"
+compatibility_date = "2026-09-23"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "car-km-tracker"
+database_id = "REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID"
+migrations_dir = "migrations"
