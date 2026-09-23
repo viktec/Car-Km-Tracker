@@ -125,7 +125,7 @@ Examples:
 - Family
 - Other
 
-Categories are configurable and are intended to adapt to different users and mileage-tracking needs.ed to provide useful statistics, such as:
+Categories are configurable and are intended to adapt to different users and mileage-tracking needs. The tracker can provide useful statistics, such as:
 
 - number of office trips
 - total office kilometres
@@ -225,20 +225,16 @@ The project can eventually support:
 
 ## Project status
 
-**Current status: early development / initial scaffold.**
+**Current status: functional MVP under development.**
 
 The repository currently contains the initial application structure and database model. The next development stages are:
 
-1. complete the database schema
-2. implement the contract and mileage calculation engine
-3. implement Telegram commands
-4. add validation and error handling
-5. connect Telegram webhooks
-6. deploy the Worker
-7. connect Cloudflare D1
-8. add automated tests
-9. add statistics and projections
-10. document deployment for other users
+1. harden validation and edge cases
+2. add multi-contract and multi-vehicle support
+3. add dashboard and charts
+4. add CSV/Excel export
+5. add alerts and configurable thresholds
+6. document production deployment for other users
 
 ## Development
 
