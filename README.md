@@ -52,9 +52,9 @@ Example commands:
 /km 5080
 /ufficio 70
 /palestra 6
-/pesaro 72
-/rimini 86
-/fondi 880
+/spesa 25
+/viaggio 300
+/trasferta 120
 /oggi
 /mese
 /anno
