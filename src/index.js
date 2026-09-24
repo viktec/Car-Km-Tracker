@@ -192,7 +192,7 @@ async function geocodePlace(place) {
   const url = new URL(NOMINATIM_URL);
   url.searchParams.set("q", place);
   url.searchParams.set("format", "jsonv2");
-  url.searchParams.set("limit", "1");
+  url.searchParams.set("limit", "3");
   url.searchParams.set("countrycodes", "it");
   const response = await fetch(url.toString(), {
     headers: { "accept": "application/json", "user-agent": "Car-Km-Tracker/1.0" }
@@ -200,7 +200,8 @@ async function geocodePlace(place) {
   if (!response.ok) throw new Error(`Geocoding failed: ${response.status}`);
   const results = await response.json();
   if (!results?.length) return null;
-  return { lat: Number(results[0].lat), lon: Number(results[0].lon), displayName: results[0].display_name };
+  const best = results.find(r => r.address?.house_number || r.address?.housenumber) || results[0];
+  return { lat: Number(best.lat), lon: Number(best.lon), displayName: best.display_name, address: best.address || {} };
 }
 
 async function calculateRoadDistance(from, to) {
@@ -211,7 +212,7 @@ async function calculateRoadDistance(from, to) {
   if (!response.ok) throw new Error(`Routing failed: ${response.status}`);
   const data = await response.json();
   if (data.code !== "Ok" || !data.routes?.length) return null;
-  return { km: Math.round((Number(data.routes[0].distance) / 1000) * 10) / 10, from: a.displayName, to: b.displayName };
+  return { km: Math.round((Number(data.routes[0].distance) / 1000) * 100) / 100, from: a.displayName, to: b.displayName };
 }
 
 async function routeDistance(env, userId, from, to) {
