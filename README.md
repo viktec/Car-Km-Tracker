@@ -708,6 +708,127 @@ If GitHub integration is already working, you normally do not need to manually d
 
 ---
 
+# 19A. Categorie personalizzate e comandi nuovi
+
+Puoi creare una categoria con qualsiasi nome.
+
+Esempio:
+
+~~~text
+/categoria urbino
+~~~
+
+Poi puoi registrare i km con:
+
+~~~text
+/urbino 70
+~~~
+
+In realtà non è necessario creare prima la categoria: anche il primo comando `/urbino 70` la crea automaticamente.
+
+Quindi sono validi anche, per esempio:
+
+~~~text
+/mare 42
+/clienti 18
+/nonno 27
+/autostrada 95
+~~~
+
+Il bot salva la categoria nel database e la mostra con:
+
+~~~text
+/categorie
+~~~
+
+### Perché Telegram non mostra automaticamente /urbino nel menu?
+
+Telegram distingue tra i comandi registrati nel menu del bot e i messaggi che il bot può ricevere.
+
+Le categorie personali sono dinamiche e possono essere diverse per ogni utente, quindi non vengono inserite automaticamente nel menu globale di Telegram. Il bot però accetta comunque il comando:
+
+~~~text
+/urbino 70
+~~~
+
+# 19B. Calcolo della distanza da punto a punto
+
+Puoi chiedere al bot la distanza stradale tra due luoghi:
+
+~~~text
+/distanza Senigallia | Urbino
+~~~
+
+oppure:
+
+~~~text
+/distanza Senigallia, AN | Urbino, PU
+~~~
+
+Il bot:
+
+1. cerca i due luoghi;
+2. calcola un percorso stradale;
+3. mostra la distanza in km;
+4. propone un pulsante **Aggiungi X km**;
+5. premendo il pulsante, registra quei km come categoria `percorso`;
+6. salva anche il percorso nei dettagli del viaggio.
+
+La distanza viene calcolata come distanza stradale, non come distanza in linea d'aria.
+
+Il calcolo usa dati OpenStreetMap per la ricerca dei luoghi e il servizio OSRM per il percorso stradale. Per questo motivo il comando richiede una connessione Internet del Worker e i nomi dei luoghi inseriti vengono inviati ai relativi servizi.
+
+Per risultati più precisi, usa località e provincia:
+
+~~~text
+/distanza Via Roma 10, Senigallia, AN | Piazza della Repubblica, Urbino, PU
+~~~
+
+> Nota: i servizi pubblici usati come impostazione predefinita sono adatti a un progetto personale a basso volume. In futuro possiamo rendere il provider di routing configurabile oppure usare un servizio dedicato con API key.
+
+# 19C. Nuova tabella D1
+
+Le nuove funzioni usano la migration:
+
+~~~text
+migrations/0002_categories_and_routes.sql
+~~~
+
+La migration crea:
+
+- `categories` — categorie personalizzate;
+- `pending_routes` — percorsi calcolati in attesa che l'utente prema "Aggiungi".
+
+Dopo aver aggiornato il codice, applica la migration al database D1 di produzione.
+
+Nel terminale, dalla cartella del progetto:
+
+~~~text
+npx wrangler d1 migrations apply car-km-tracker --remote
+~~~
+
+Oppure puoi eseguire manualmente in D1 SQL Console il contenuto di:
+
+~~~text
+migrations/0002_categories_and_routes.sql
+~~~
+
+Verifica poi:
+
+~~~sql
+SELECT name
+FROM sqlite_master
+WHERE type = 'table'
+ORDER BY name;
+~~~
+
+Dovresti vedere anche:
+
+~~~text
+categories
+pending_routes
+~~~
+
 # 20. Step 17 — Test the Worker URL
 
 Open the Worker URL in your browser.
