@@ -43,7 +43,7 @@ function normalizeCategory(value) {
   return String(value || "")
     .trim()
     .toLowerCase()
-    .replace(/^\\/+/, "")
+    .replace(/^\/+/, "")
     .replace(/[^a-z0-9àèéìòù_-]/gi, "")
     .slice(0, 32);
 }
@@ -390,7 +390,15 @@ async function handleUpdate(request, env) {
   else {
     const contract = await getContract(env, chatId);
     if (!contract) reply = "Nessun contratto configurato. Usa /contratto YYYY-MM-DD YYYY-MM-DD KM.";
-    else if (command === "/km") {
+    else if (command === "/categoria") reply = await addCategory(env, chatId, args.join(" "));
+    else if (command === "/distanza") {
+      const raw = args.join(" ");
+      const separator = raw.includes("|") ? "|" : ">";
+      const [from, to] = raw.split(separator).map(s => s.trim());
+      const result = await routeDistance(env, chatId, from, to);
+      reply = result.text;
+      replyMarkup = result.replyMarkup;
+    } else if (command === "/km") {
       const value = parsePositiveNumber(args[0]);
       reply = value ? await addOdometer(env, chatId, value) : "Uso: /km 5080";
       if (value) {
