@@ -781,7 +781,7 @@ Il calcolo usa dati OpenStreetMap per la ricerca dei luoghi e il servizio OSRM p
 Per risultati più precisi, usa località e provincia:
 
 ~~~text
-/distanza Via Roma 10, Senigallia, AN | Piazza della Repubblica, Urbino, PU
+/distanza Via Urbinate 52, Urbino, PU | Via Comandino, Urbino, PU
 ~~~
 
 > Nota: i servizi pubblici usati come impostazione predefinita sono adatti a un progetto personale a basso volume. In futuro possiamo rendere il provider di routing configurabile oppure usare un servizio dedicato con API key.
