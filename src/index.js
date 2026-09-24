@@ -35,7 +35,8 @@ function formatNumber(n) {
 }
 
 function parsePositiveNumber(value) {
-  const n = Number(String(value ?? "").replace(",", "."));
+  const normalized = String(value ?? "").trim().toLowerCase().replace(",", ".").replace(/\s*km$/, "");
+  const n = Number(normalized);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
