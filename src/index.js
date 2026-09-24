@@ -90,7 +90,7 @@ function helpText() {
     "",
     "Comandi:",
     "/km 5080 - imposta la base iniziale del contachilometri",
-    "/annulla - annulla l'ultima lettura km",
+    "/annulla - annulla l'ultimo viaggio registrato",
     "/categoria urbino - crea una categoria personalizzata",
     "/urbino 70 - registra 70 km nella categoria Urbino",
     "/distanza Senigallia | Urbino - calcola la distanza stradale",
@@ -160,19 +160,19 @@ async function addOdometer(env, userId, value) {
   return `✅ Contachilometri aggiornato a ${formatNumber(value)} km.\nKm usati dal contratto: ${formatNumber(value)} km.`;
 }
 
-async function undoLastOdometer(env, userId) {
+async function undoLastTrip(env, userId) {
   const contract = await ensureContract(env, userId);
   if (!contract) return { ok: false, text: "Nessun contratto configurato." };
   const last = await env.DB.prepare(
-    "SELECT id, reading_km FROM odometer_readings WHERE contract_id = ? ORDER BY id DESC LIMIT 1"
+    "SELECT id, category, km, note FROM trips WHERE contract_id = ? ORDER BY id DESC LIMIT 1"
   ).bind(contract.id).first();
-  if (!last) return { ok: false, text: "Non c'è nessuna lettura km da annullare." };
+  if (!last) return { ok: false, text: "Non c'è nessun viaggio da annullare." };
   await env.DB.prepare(
-    "DELETE FROM odometer_readings WHERE id = ? AND contract_id = ?"
+    "DELETE FROM trips WHERE id = ? AND contract_id = ?"
   ).bind(last.id, contract.id).run();
   return {
     ok: true,
-    text: `↩️ Annullata l'ultima lettura: ${formatNumber(last.reading_km)} km.`
+    text: "↩️ Annullato l'ultimo viaggio: " + formatNumber(Number(last.km)) + " km (" + last.category + ")."
   };
 }
 
@@ -346,8 +346,8 @@ async function handleCallback(update, env) {
   const chatId = callback?.message?.chat?.id;
   if (!callback?.id || !chatId) return { ok: true };
 
-  if (callback.data === "undo_last_odometer") {
-    const result = await undoLastOdometer(env, chatId);
+  if (callback.data === "undo_last_trip") {
+    const result = await undoLastTrip(env, chatId);
     await telegram(env, "answerCallbackQuery", {
       callback_query_id: callback.id,
       text: result.text
@@ -407,16 +407,13 @@ async function handleUpdate(request, env) {
       reply = value ? await addOdometer(env, chatId, value) : "Uso: /km 5080";
       if (value) {
         replyMarkup = {
-          inline_keyboard: [
-            [
-              { text: "↩️ Annulla ultimo invio", callback_data: "undo_last_odometer" },
-              { text: "📊 Statistiche", callback_data: "show_stats" }
-            ]
-          ]
+          inline_keyboard: [[
+            { text: "📊 Statistiche", callback_data: "show_stats" }
+          ]]
         };
       }
     } else if (command === "/annulla") {
-      const result = await undoLastOdometer(env, chatId);
+      const result = await undoLastTrip(env, chatId);
       reply = result.text;
     } else if (command === "/oggi") {
       const value = parsePositiveNumber(args[0]);
