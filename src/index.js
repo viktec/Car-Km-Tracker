@@ -404,6 +404,10 @@ async function handleUpdate(request, env) {
   const command = (parts.shift() || "").toLowerCase().split("@")[0];
   const args = parts;
 
+  if (command === "/start") {
+    await telegram(env, "setMyCommands", { commands: BOT_COMMANDS });
+  }
+
   let reply;
   let replyMarkup;
   if (command === "/start" || command === "/help") reply = helpText();
