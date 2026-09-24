@@ -89,7 +89,7 @@ function helpText() {
     "/contratto 2026-06-18 2027-06-18 15000",
     "",
     "Comandi:",
-    "/km 5080 - registra il contachilometri",
+    "/km 5080 - imposta la base iniziale del contachilometri",
     "/annulla - annulla l'ultima lettura km",
     "/categoria urbino - crea una categoria personalizzata",
     "/urbino 70 - registra 70 km nella categoria Urbino",
@@ -99,7 +99,7 @@ function helpText() {
     "/spesa 25",
     "/viaggio 300",
     "/trasferta 120",
-    "/oggi - riepilogo di oggi",
+    "/oggi - riepilogo di oggi\n    "/oggi 50 - aggiunge 50 km non categorizzati",
     "/settimana - riepilogo ultimi 7 giorni",
     "/mese - riepilogo del mese",
     "/anno - riepilogo dell'anno",
@@ -274,11 +274,12 @@ async function usageStats(env, contract) {
     "SELECT COALESCE(SUM(km), 0) AS km FROM trips WHERE contract_id = ?"
   ).bind(contract.id).first();
 
-  // The odometer is an absolute vehicle mileage value. The contract usage
-  // therefore equals the latest odometer reading, not the delta from the
-  // first reading entered in the bot.
-  const odometerKm = last ? Number(last.reading_km) : null;
-  const usedKm = odometerKm ?? Number(trip.km || 0);
+  // /km establishes the initial odometer/base value. Every subsequent
+  // category entry is an additional distance, so contract usage is the
+  // base value plus all registered trips.
+  const baseKm = last ? Number(last.reading_km) : 0;
+  const tripKm = Number(trip.km || 0);
+  const usedKm = baseKm + tripKm;
   const remaining = contract.allowed_km - usedKm;
   const today = todayInTimeZone(env.TIME_ZONE || "UTC");
   const elapsed = Math.max(0, Math.min(daysInclusive(contract.start_date, today), daysInclusive(contract.start_date, contract.end_date)));
@@ -289,7 +290,7 @@ async function usageStats(env, contract) {
   const projected = usedKm + avgDaily * Math.max(0, totalDays - elapsed);
   const percent = contract.allowed_km > 0 ? (usedKm / contract.allowed_km) * 100 : 0;
 
-  return { usedKm, remaining, elapsed, totalDays, remainingDays, dailyBudget, avgDaily, projected, percent, today, odometerKm, tripKm: Number(trip.km || 0) };
+  return { usedKm, remaining, elapsed, totalDays, remainingDays, dailyBudget, avgDaily, projected, percent, today, odometerKm: baseKm, tripKm };
 }
 
 async function statsText(env, contract, detailed = true) {
@@ -416,8 +417,13 @@ async function handleUpdate(request, env) {
     } else if (command === "/annulla") {
       const result = await undoLastOdometer(env, chatId);
       reply = result.text;
-    } else if (["/oggi", "/settimana", "/mese", "/anno"].includes(command)) {
-      reply = await periodText(env, contract, command === "/settimana" ? "week" : command === "/mese" ? "month" : command === "/anno" ? "year" : "today");
+    } else if (command === "/oggi") {
+      const value = parsePositiveNumber(args[0]);
+      reply = value
+        ? await addTrip(env, chatId, "generale", value, "Inserimento giornaliero")
+        : await periodText(env, contract, "today");
+    } else if (["/settimana", "/mese", "/anno"].includes(command)) {
+      reply = await periodText(env, contract, command === "/settimana" ? "week" : command === "/mese" ? "month" : "year");
     } else if (command === "/statistiche" || command === "/riepilogo") reply = await statsText(env, contract, command === "/statistiche");
     else if (command === "/categorie") reply = await categoriesText(env, contract);
     else if (command.startsWith("/")) {
