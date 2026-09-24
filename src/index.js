@@ -419,9 +419,12 @@ async function handleUpdate(request, env) {
     } else if (command === "/statistiche" || command === "/riepilogo") reply = await statsText(env, contract, command === "/statistiche");
     else if (command === "/categorie") reply = await categoriesText(env, contract);
     else if (command.startsWith("/")) {
+      const category = normalizeCategory(command.slice(1));
       const value = parsePositiveNumber(args[0]);
-      reply = value ? await addTrip(env, chatId, command.slice(1), value) : "Uso: /categoria KM, ad esempio /ufficio 70";
-    } else reply = "Comando non riconosciuto. Usa /help.";
+      reply = category && value
+        ? await addTrip(env, chatId, category, value)
+        : "Categoria non valida. Usa /categoria nome e poi /nome KM. Esempio: /urbino 70";
+    } else reply = "Comando non riconosciuto. Usa /help."
   }
 
   await sendMessage(env, chatId, reply, replyMarkup);
