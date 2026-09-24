@@ -1,4 +1,6 @@
 const TELEGRAM_API = "https://api.telegram.org";
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+const OSRM_URL = "https://router.project-osrm.org/route/v1/driving";
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -33,8 +35,17 @@ function formatNumber(n) {
 }
 
 function parsePositiveNumber(value) {
-  const n = Number(value);
+  const n = Number(String(value ?? "").replace(",", "."));
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function normalizeCategory(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^\\/+/, "")
+    .replace(/[^a-z0-9àèéìòù_-]/gi, "")
+    .slice(0, 32);
 }
 
 async function telegram(env, method, body) {
@@ -79,7 +90,10 @@ function helpText() {
     "Comandi:",
     "/km 5080 - registra il contachilometri",
     "/annulla - annulla l'ultima lettura km",
-    "/ufficio 70 - registra un viaggio",
+    "/categoria urbino - crea una categoria personalizzata",
+    "/urbino 70 - registra 70 km nella categoria Urbino",
+    "/distanza Senigallia | Urbino - calcola la distanza stradale",
+    "/ufficio 70",
     "/palestra 6",
     "/spesa 25",
     "/viaggio 300",
@@ -113,6 +127,17 @@ async function createContract(env, userId, args) {
     "INSERT INTO contracts (user_id, name, start_date, end_date, allowed_km) VALUES (?, 'Car', ?, ?, ?)"
   ).bind(String(userId), start, end, km).run();
   return `✅ Contratto creato: ${formatNumber(km)} km dal ${start} al ${end}.`;
+}
+
+async function addCategory(env, userId, rawCategory) {
+  const contract = await ensureContract(env, userId);
+  if (!contract) return "Prima configura il contratto con /contratto YYYY-MM-DD YYYY-MM-DD KM.";
+  const category = normalizeCategory(rawCategory);
+  if (!category) return "Uso: /categoria urbino";
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO categories (contract_id, name) VALUES (?, ?)"
+  ).bind(contract.id, category).run();
+  return `✅ Categoria "/${category}" creata. Ora puoi usare /${category} 70.`;
 }
 
 async function addOdometer(env, userId, value) {
@@ -149,14 +174,94 @@ async function undoLastOdometer(env, userId) {
   };
 }
 
-async function addTrip(env, userId, category, value) {
+async function addTrip(env, userId, category, value, note = null) {
   const contract = await ensureContract(env, userId);
   if (!contract) return "Prima configura il contratto con /contratto YYYY-MM-DD YYYY-MM-DD KM.";
+  const cleanCategory = normalizeCategory(category) || "other";
   const date = todayInTimeZone(env.TIME_ZONE || "UTC");
   await env.DB.prepare(
-    "INSERT INTO trips (contract_id, date, category, km) VALUES (?, ?, ?, ?)"
-  ).bind(contract.id, date, category, value).run();
-  return `✅ Registrati ${formatNumber(value)} km: ${category}.`;
+    "INSERT INTO categories (contract_id, name) VALUES (?, ?) ON CONFLICT(contract_id, name) DO NOTHING"
+  ).bind(contract.id, cleanCategory).run();
+  await env.DB.prepare(
+    "INSERT INTO trips (contract_id, date, category, km, note) VALUES (?, ?, ?, ?, ?)"
+  ).bind(contract.id, date, cleanCategory, value, note).run();
+  return `✅ Registrati ${formatNumber(value)} km: ${cleanCategory}.`;
+}
+
+async function geocodePlace(place) {
+  const url = new URL(NOMINATIM_URL);
+  url.searchParams.set("q", place);
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("limit", "1");
+  url.searchParams.set("countrycodes", "it");
+  const response = await fetch(url.toString(), {
+    headers: { "accept": "application/json", "user-agent": "Car-Km-Tracker/1.0" }
+  });
+  if (!response.ok) throw new Error(`Geocoding failed: ${response.status}`);
+  const results = await response.json();
+  if (!results?.length) return null;
+  return { lat: Number(results[0].lat), lon: Number(results[0].lon), displayName: results[0].display_name };
+}
+
+async function calculateRoadDistance(from, to) {
+  const [a, b] = await Promise.all([geocodePlace(from), geocodePlace(to)]);
+  if (!a || !b) return null;
+  const url = `${OSRM_URL}/${a.lon},${a.lat};${b.lon},${b.lat}?overview=false`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Routing failed: ${response.status}`);
+  const data = await response.json();
+  if (data.code !== "Ok" || !data.routes?.length) return null;
+  return { km: Math.round((Number(data.routes[0].distance) / 1000) * 10) / 10, from: a.displayName, to: b.displayName };
+}
+
+async function routeDistance(env, userId, from, to) {
+  const contract = await ensureContract(env, userId);
+  if (!contract) return { text: "Prima configura il contratto con /contratto YYYY-MM-DD YYYY-MM-DD KM." };
+  if (!from || !to) return { text: "Uso: /distanza Punto di partenza | Punto di arrivo\nEsempio: /distanza Senigallia | Urbino" };
+  try {
+    const route = await calculateRoadDistance(from, to);
+    if (!route) return { text: "❌ Non trovo uno dei due punti. Prova con località e provincia, es. Senigallia, AN | Urbino, PU." };
+    const pending = await env.DB.prepare(
+      "INSERT INTO pending_routes (contract_id, from_place, to_place, distance_km) VALUES (?, ?, ?, ?) RETURNING id"
+    ).bind(contract.id, from.trim(), to.trim(), route.km).first();
+    return {
+      text: [
+        "📍 Distanza stradale calcolata",
+        `Da: ${from.trim()}`,
+        `A: ${to.trim()}`,
+        `Percorso: ${formatNumber(route.km)} km`,
+        "",
+        "Premi il pulsante per aggiungere la distanza ai viaggi."
+      ].join("\n"),
+      replyMarkup: {
+        inline_keyboard: [[
+          { text: `➕ Aggiungi ${formatNumber(route.km)} km`, callback_data: `add_route:${pending.id}` }
+        ]]
+      }
+    };
+  } catch (error) {
+    console.error("routeDistance", error);
+    return { text: "❌ Errore nel calcolo della distanza. Riprova tra poco o specifica meglio i luoghi." };
+  }
+}
+
+async function addPendingRoute(env, userId, routeId) {
+  const contract = await ensureContract(env, userId);
+  if (!contract) return { ok: false, text: "Nessun contratto configurato." };
+  const route = await env.DB.prepare(
+    "SELECT id, from_place, to_place, distance_km FROM pending_routes WHERE id = ? AND contract_id = ?"
+  ).bind(routeId, contract.id).first();
+  if (!route) return { ok: false, text: "Percorso non trovato o già aggiunto." };
+  const date = todayInTimeZone(env.TIME_ZONE || "UTC");
+  const note = `${route.from_place} → ${route.to_place}`;
+  await env.DB.prepare(
+    "INSERT INTO categories (contract_id, name) VALUES (?, 'percorso') ON CONFLICT(contract_id, name) DO NOTHING"
+  ).bind(contract.id).run();
+  await env.DB.prepare(
+    "INSERT INTO trips (contract_id, date, category, km, note) VALUES (?, ?, 'percorso', ?, ?)"
+  ).bind(contract.id, date, route.distance_km, note).run();
+  await env.DB.prepare("DELETE FROM pending_routes WHERE id = ?").bind(route.id).run();
+  return { ok: true, text: `✅ Aggiunti ${formatNumber(route.distance_km)} km.\n${note}` };
 }
 
 async function usageStats(env, contract) {
@@ -226,9 +331,9 @@ async function periodText(env, contract, period) {
 
 async function categoriesText(env, contract) {
   const rows = await env.DB.prepare(
-    "SELECT category, SUM(km) AS km, COUNT(*) AS trips FROM trips WHERE contract_id = ? GROUP BY category ORDER BY km DESC"
+    "SELECT c.name AS category, COALESCE(SUM(t.km), 0) AS km, COUNT(t.id) AS trips FROM categories c LEFT JOIN trips t ON t.contract_id = c.contract_id AND t.category = c.name WHERE c.contract_id = ? GROUP BY c.name ORDER BY km DESC, c.name"
   ).bind(contract.id).all();
-  if (!rows.results.length) return "Nessuna categoria registrata.";
+  if (!rows.results.length) return "Nessuna categoria creata.";
   return ["📊 Categorie", ...rows.results.map(r => `• ${r.category}: ${formatNumber(Number(r.km))} km (${r.trips} viaggi)`)].join("\n");
 }
 
@@ -254,6 +359,14 @@ async function handleCallback(update, env) {
     });
     const contract = await getContract(env, chatId);
     if (contract) await sendMessage(env, chatId, await statsText(env, contract));
+  } else if (callback.data?.startsWith("add_route:")) {
+    const routeId = Number(callback.data.split(":")[1]);
+    const result = await addPendingRoute(env, chatId, routeId);
+    await telegram(env, "answerCallbackQuery", {
+      callback_query_id: callback.id,
+      text: result.text
+    });
+    await sendMessage(env, chatId, result.text);
   }
 
   return { ok: true };
