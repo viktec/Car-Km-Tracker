@@ -49,6 +49,23 @@ function normalizeCategory(value) {
     .slice(0, 32);
 }
 
+const BOT_COMMANDS = [
+  { command: "start", description: "Avvia il bot" },
+  { command: "help", description: "Mostra l'aiuto" },
+  { command: "contratto", description: "Configura il contratto" },
+  { command: "km", description: "Imposta la base del contachilometri" },
+  { command: "annulla", description: "Annulla l'ultimo viaggio" },
+  { command: "categoria", description: "Crea una categoria" },
+  { command: "distanza", description: "Calcola una distanza stradale" },
+  { command: "oggi", description: "Riepilogo o aggiunta km di oggi" },
+  { command: "settimana", description: "Riepilogo degli ultimi 7 giorni" },
+  { command: "mese", description: "Riepilogo del mese" },
+  { command: "anno", description: "Riepilogo dell'anno" },
+  { command: "statistiche", description: "Mostra le statistiche" },
+  { command: "riepilogo", description: "Mostra il riepilogo" },
+  { command: "categorie", description: "Mostra le categorie" }
+];
+
 async function telegram(env, method, body) {
   if (!env.TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
   const response = await fetch(
